@@ -1,6 +1,8 @@
 #include <unistd.h>  // sleep()
 #include <math.h>
 #include <V3DLib.h>
+#include <iostream>
+#include <fstream>
 #include "Support/Settings.h"
 #include "Support/Timer.h"
 #include "Support/debug.h"
@@ -38,6 +40,12 @@ CmdParameters params = {
     ParamType::POSITIVE_INTEGER,
     "The number times to execute the matrix multiplication",
     1
+  },{
+    "Save result",
+    { "-o", "-save"},
+    ParamType::INTEGER,
+    "Saves the result of the calculation in a binary format. (a.bin, b.bin, result.bin)",
+    0,
   }}
 };
 
@@ -46,8 +54,10 @@ struct MatrixSettings : public Settings {
   int kernel;
   int dimension;
   int repeats;
+  bool save_result;
 
-  int size() const { return dimension*dimension; }
+
+    int size() const { return dimension*dimension; }
 
   MatrixSettings() : Settings(&params, true) {}
 
@@ -57,9 +67,9 @@ struct MatrixSettings : public Settings {
     kernel      = p["Kernel"           ]->get_int_value();
     dimension   = p["Matrix dimension" ]->get_int_value();
     repeats     = p["Number of repeats"]->get_int_value();
+    save_result = p["Save result"      ]->get_int_value();
     return true;
   }
-
 } settings;
 
 
@@ -92,8 +102,33 @@ void run_scalar_kernel() {
   delete [] result;
 }
 
+// with help of chatGPT
+void writeFloatDataToFile(const std::string& filename, Shared2DArray<float>& array) {
+  std::ofstream outFile(filename, std::ios::binary);
+  if (!outFile) {
+    std::cout << "failed to open filename: " << filename << std::endl;
+    // Failed to open the file
+    return;
+  }
 
-void run_qpu_kernel() {
+  // first write the dimension as float for easier parsing in python
+  float dimensions = 2;
+  outFile.write(reinterpret_cast<const char*>(&dimensions), sizeof(float));
+
+  // write the dimension sizes
+  float dims[] = {static_cast<float>(array.rows()), static_cast<float>(array.columns())};
+  outFile.write(reinterpret_cast<const char*>(dims), 2 * sizeof(float));
+
+  // Write the float data to the file
+  auto num_elements = array.rows() * array.columns();
+  outFile.write(reinterpret_cast<const char*>(array.ptr()), num_elements * sizeof(float));
+
+  // Close the file
+  outFile.close();
+  std::cout << "wrote array to file `" << filename << "`" << std::endl;
+}
+
+void run_qpu_kernel(bool save_result) {
   auto k = compile(kernels::matrix_mult_decorator(settings.dimension));  // Construct kernel
   k.setNumQPUs(settings.num_qpus);
 
@@ -116,6 +151,16 @@ void run_qpu_kernel() {
     settings.process(k);
   }
   timer.end(!settings.silent);
+
+  if (save_result) {
+    // print matrixes
+//  std::cout << "a:" << a.dump() << std::endl;
+    writeFloatDataToFile("a.bin", a);
+//  std::cout << "b:" << b.dump() << std::endl;
+    writeFloatDataToFile("b.bin", b);
+//  std::cout << "result:" << result.dump() << std::endl;
+    writeFloatDataToFile("result.bin", result);
+  }
 }
 
 
@@ -128,7 +173,7 @@ int main(int argc, const char *argv[]) {
 
   // Run a kernel as specified by the passed kernel index
   switch (settings.kernel) {
-    case 0: run_qpu_kernel();     break;  
+    case 0: run_qpu_kernel(settings.save_result);     break;
     case 1: run_scalar_kernel();  break;
     default: assert(false);       break;
   }

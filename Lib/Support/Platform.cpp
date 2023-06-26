@@ -183,6 +183,8 @@ PlatformInfo::PlatformInfo() {
   }
 
   if (!platform_id.empty() && is_pi_platform) {
+    // TODO: fix that his works correctly
+    //       workaround so it works on my Compute Module 4
     has_vc4 = false;//(platform_id.npos == platform_id.find("Pi 4"));
   }
 
